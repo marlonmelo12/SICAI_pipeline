@@ -53,15 +53,43 @@ class OllamaQwenEngine(QwenEngineAdapter):
     Motor de inferência conectando ao Ollama (com suporte a aceleração por GPU CUDA).
     Utiliza decodificação guiada por JSON nativa do Ollama.
     """
-    def __init__(self, host: str = "http://localhost:11434", model_name: str = "qwen2.5:7b-instruct", timeout: int = 45):
+    def __init__(self, host: str = "http://localhost:11434", model_name: str = "qwen2.5:7b", timeout: int = 60):
         self.host = host.rstrip("/")
         self.model_name = model_name
         self.timeout = timeout
 
-    def is_available(self) -> bool:
+    def get_installed_models(self) -> List[str]:
+        """Retorna a lista de modelos baixados no Ollama."""
         try:
-            resp = requests.get(f"{self.host}/api/tags", timeout=2)
-            return resp.status_code == 200
+            resp = requests.get(f"{self.host}/api/tags", timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
+                return [m.get("name", "") for m in data.get("models", [])]
+        except Exception:
+            pass
+        return []
+
+    def is_available(self) -> bool:
+        """Verifica se o servidor Ollama está online e se há um modelo compatível instalado."""
+        try:
+            models = self.get_installed_models()
+            if not models:
+                # Servidor pode estar online mas sem modelos baixados
+                resp = requests.get(f"{self.host}/api/tags", timeout=2)
+                return resp.status_code == 200
+
+            # Se o modelo exato está presente, perfeito
+            if any(self.model_name in m for m in models):
+                return True
+
+            # Auto-detecta qualquer variante do Qwen presente
+            for m in models:
+                if "qwen" in m.lower():
+                    logger.info(f"Auto-detectado modelo Ollama compatível: {m}")
+                    self.model_name = m
+                    return True
+
+            return True
         except Exception:
             return False
 
@@ -87,6 +115,15 @@ class OllamaQwenEngine(QwenEngineAdapter):
 
         try:
             response = requests.post(f"{self.host}/api/chat", json=payload, timeout=self.timeout)
+            if response.status_code == 404:
+                err_body = response.text
+                installed = self.get_installed_models()
+                logger.error(
+                    f"Modelo '{self.model_name}' não encontrado no Ollama (404).\n"
+                    f"Modelos atualmente instalados no Ollama: {installed}\n"
+                    f"-> Para baixar o modelo, execute: docker exec -it sicai-ollama ollama pull qwen2.5:7b"
+                )
+                return []
             response.raise_for_status()
             data = response.json()
             raw_content = data.get("message", {}).get("content", "[]")
@@ -114,7 +151,6 @@ class OllamaQwenEngine(QwenEngineAdapter):
                     logger.debug(f"Erro na validação Pydantic de item LLM: {val_err}")
 
             return valid_events
-
         except Exception as e:
             logger.error(f"Falha na inferência Ollama para página {page_number}: {e}")
             return []
@@ -207,7 +243,7 @@ class LLMCustodyWorker:
             self.engine = engine
         else:
             ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-            model_name = os.getenv("LLM_MODEL_NAME", "qwen2.5:7b-instruct")
+            model_name = os.getenv("LLM_MODEL_NAME", "qwen2.5:7b")
             ollama = OllamaQwenEngine(host=ollama_host, model_name=model_name)
             if ollama.is_available():
                 logger.info(f"Ollama ativo detectado em {ollama_host}. Usando {model_name}.")

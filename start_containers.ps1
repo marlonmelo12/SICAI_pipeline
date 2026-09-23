@@ -22,8 +22,8 @@ Write-Host "==> Aguardando servicos estabilizarem..." -ForegroundColor Yellow
 Start-Sleep -Seconds 5
 
 # 4. Baixa o modelo Qwen 2.5 7B no Ollama (com GPU)
-Write-Host "==> Baixando modelo Qwen 2.5 7B Instruct no Ollama..." -ForegroundColor Yellow
-docker exec -it sicai-ollama ollama pull qwen2.5:7b-instruct
+Write-Host "==> Baixando modelo Qwen 2.5 7B no Ollama..." -ForegroundColor Yellow
+docker exec -it sicai-ollama ollama pull qwen2.5:7b
 
 # 5. Exibe os endpoints prontos para uso
 Write-Host ""

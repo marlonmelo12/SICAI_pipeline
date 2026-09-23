@@ -32,19 +32,24 @@ def main():
 
     # 1. Verifica conectividade com o Ollama (GPU)
     ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    model_name = os.getenv("LLM_MODEL_NAME", "qwen2.5:7b-instruct")
+    model_name = os.getenv("LLM_MODEL_NAME", "qwen2.5:7b")
     
     ollama = OllamaQwenEngine(host=ollama_host, model_name=model_name)
-    is_gpu_active = ollama.is_available()
+    installed_models = ollama.get_installed_models()
 
-    if is_gpu_active:
+    if installed_models:
+        ollama.is_available()  # aciona auto-detecção de modelo
         print(f"[STATUS] \033[92mOllama Conectado com Sucesso!\033[0m")
         print(f" - Endpoint: {ollama_host}")
-        print(f" - Modelo:   {model_name}")
+        print(f" - Modelos baixados no Ollama: {installed_models}")
+        print(f" - Modelo ativo para inferência: {ollama.model_name}")
         engine = ollama
     else:
-        print(f"[STATUS] \033[93mOllama offline em {ollama_host}.\033[0m")
-        print(" - Operando em modo contingência (MockQwenEngine) para demonstrar o fluxo.")
+        print(f"[STATUS] \033[93mAviso: Ollama online, mas o modelo '{model_name}' ainda não foi baixado na GPU.\033[0m")
+        print(f" - Modelos encontrados no Ollama: {installed_models}")
+        print(f" -> Baixe o modelo executando no terminal do PowerShell:")
+        print(f"    docker exec -it sicai-ollama ollama pull qwen2.5:7b\n")
+        print(" - Executando teste com MockQwenEngine para validar o restante do pipeline.")
         engine = MockQwenEngine()
 
     # 2. Localiza o documento pericial para teste
