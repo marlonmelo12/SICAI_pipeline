@@ -197,7 +197,7 @@ services:
       - ./dbt:/app/dbt
       - ./data:/app/data
       - ./Vernix:/app/Vernix:ro
-    command: ["pytest", "-v"]
+    command: ["tail", "-f", "/dev/null"]
 
 volumes:
   garage_meta:
