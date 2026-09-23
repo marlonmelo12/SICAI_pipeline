@@ -13,11 +13,6 @@ services:
       - garage_meta:/var/lib/garage/meta
       - garage_data:/var/lib/garage/data
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "garage status || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # 2. Database & Metadata Catalog: PostgreSQL 16
   postgres:

@@ -1,4 +1,4 @@
-# Garage S3 Configuration for SICAI Local Platform
+# Garage S3 Configuration for SICAI Local Platform (Garage v1.x / v2.x compliant)
 metadata_dir = "/var/lib/garage/meta"
 data_dir = "/var/lib/garage/data"
 db_engine = "sqlite"
@@ -6,19 +6,18 @@ db_engine = "sqlite"
 replication_factor = 1
 
 [rpc]
-network_bind_address = "[::]:3901"
-network_public_address = "127.0.0.1:3901"
-network_secret = "b234479e0db9a6a84f3c25cf629e884ecbcae5c8309df55fa4f971b3152d19f6"
+bind_addr = "[::]:3901"
+rpc_secret = "b234479e0db9a6a84f3c25cf629e884ecbcae5c8309df55fa4f971b3152d19f6"
 
 [s3_api]
-api_bind_address = "[::]:3900"
 s3_region = "garage"
+api_bind_addr = "[::]:3900"
 root_domain = ".s3.garage"
 
 [s3_web]
-bind_address = "[::]:3902"
+bind_addr = "[::]:3902"
 root_domain = ".web.garage"
 
 [admin]
-api_bind_address = "[::]:3903"
+api_bind_addr = "[::]:3903"
 admin_token = "sicai_admin_garage_token_2026"

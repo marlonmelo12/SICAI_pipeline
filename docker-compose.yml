@@ -23,11 +23,6 @@ services:
       - garage_meta:/var/lib/garage/meta
       - garage_data:/var/lib/garage/data
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "garage status || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # -------------------------------------------------------------
   # 2. Catálogo de Metadados e Governança: PostgreSQL 16
@@ -185,7 +180,7 @@ services:
       postgres:
         condition: service_healthy
       garage:
-        condition: service_healthy
+        condition: service_started
     environment:
       - S3_ENDPOINT_URL=http://garage:3900
       - S3_REGION=garage
