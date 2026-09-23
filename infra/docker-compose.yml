@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # 1. Object Storage: Garage S3 (Rust-based lightweight S3-compatible daemon)
+  garage:
+    image: dxflrs/garage:v1.0.1
+    container_name: sicai-garage
+    ports:
+      - "3900:3900" # S3 API endpoint
+      - "3902:3902" # Admin API endpoint
+    volumes:
+      - ./garage/config.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "garage status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Database & Metadata Catalog: PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: sicai-postgres
+    environment:
+      POSTGRES_DB: sicai
+      POSTGRES_USER: sicai_admin
+      POSTGRES_PASSWORD: sicai_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sicai_admin -d sicai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Event Streaming: Redpanda (Kafka 3.x API compatible, zero-JVM, ultra-fast)
+  kafka:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.8
+    container_name: sicai-kafka
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    restart: unless-stopped
+
+  # 4. Search & Serving Layer: OpenSearch 2.14
+  opensearch:
+    image: opensearchproject/opensearch:2.14.0
+    container_name: sicai-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    restart: unless-stopped
+
+  # 5. OpenSearch Dashboards (Interactive Timeline Exploration)
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.14.0
+    container_name: sicai-dashboards
+    ports:
+      - "5601:5601"
+    environment:
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    depends_on:
+      - opensearch
+    restart: unless-stopped
+
+  # 6. Apache Airflow (Standalone for MVP 1 Orchestration)
+  airflow:
+    image: apache/airflow:2.9.2-python3.11
+    container_name: sicai-airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://sicai_admin:sicai_password@postgres:5432/sicai
+      - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqJZPo=
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=sicai_secret_airflow_key
+      - PYTHONPATH=/opt/airflow:/opt/airflow/src
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../src:/opt/airflow/src
+      - ../Vernix:/opt/airflow/data/Vernix:ro
+    command: standalone
+    restart: unless-stopped
+
+volumes:
+  garage_meta:
+  garage_data:
+  postgres_data:
+  redpanda_data:
+  opensearch_data:

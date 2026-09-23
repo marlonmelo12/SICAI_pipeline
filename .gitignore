@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Testes e Cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Dados Forenses Brutos (12 GB - Transferir via SSD / Rede / S3, não via Git)
+Vernix/
+
+# Dados locais gerados pelo Lakehouse
+data/lakehouse/
+data/raw/
+*.parquet
+
+# IDEs e Sistema Operacional
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini

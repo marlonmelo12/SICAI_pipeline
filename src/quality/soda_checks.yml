@@ -1,0 +1,34 @@
+# src/quality/soda_checks.yml
+# Regras declarativas de qualidade para a Camada Silver do Lakehouse SICAI
+
+checks for silver_forensic_artifacts:
+  # 1. Completude
+  - missing_count(artifact_id) = 0
+  - missing_count(file_path) = 0
+  - missing_count(size_bytes) = 0
+
+  # 2. Unicidade
+  - duplicate_count(artifact_id) = 0
+
+  # 3. Integridade e Formato de Hash
+  - invalid_count(sha256) = 0:
+      valid regex: '^[a-fA-F0-9]{64}$'
+
+  # 4. Consistência Temporal (Sem viajantes do tempo no futuro)
+  - failed rows:
+      name: Temporal future anomaly check
+      fail query: |
+        SELECT artifact_id, file_path, modified_at
+        FROM silver_forensic_artifacts
+        WHERE modified_at > CURRENT_TIMESTAMP + INTERVAL '1 hour'
+
+checks for silver_custody_events:
+  # 1. Completude
+  - missing_count(event_id) = 0
+  - missing_count(evidence_id) = 0
+  - missing_count(event_timestamp) = 0
+  - missing_count(stage) = 0
+
+  # 2. Estágios do CPP
+  - invalid_count(stage) = 0:
+      valid values: ['RECONHECIMENTO', 'ISOLAMENTO', 'FIXACAO', 'COLETA', 'RECEBIMENTO', 'TRANSPORTE', 'PROCESSAMENTO', 'ARMAZENAMENTO', 'DESCARTE']

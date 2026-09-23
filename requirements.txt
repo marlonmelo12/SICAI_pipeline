@@ -1,0 +1,25 @@
+# SICAI - Sistema Inteligente de Cadeia de Custódia com IA
+# Dependências do Pipeline de Engenharia de Dados e IA Forense
+
+# Data Engineering & Lakehouse Storage Engine
+pyarrow>=15.0.0
+pandas>=2.2.0
+pandera[io]>=0.19.0
+duckdb>=0.10.0
+
+# Document & Forensic Processing
+pypdf>=4.0.0
+python-docx>=1.1.0
+
+# Validação e Contratos de Dados
+pydantic>=2.7.0
+
+# LLM & IA Forense (Qwen 2.5)
+requests>=2.31.0
+transformers>=4.45.0
+accelerate>=0.34.0
+bitsandbytes>=0.43.0; sys_platform != 'win32' or platform_machine == 'x86_64'
+
+# Testes e Qualidade
+pytest>=8.0.0
+pytest-cov>=4.1.0
