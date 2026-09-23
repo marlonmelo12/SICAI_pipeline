@@ -196,6 +196,7 @@ services:
       - ./tests:/app/tests
       - ./dbt:/app/dbt
       - ./data:/app/data
+      - ./scripts:/app/scripts
       - ./Vernix:/app/Vernix:ro
     command: ["tail", "-f", "/dev/null"]
 

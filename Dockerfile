@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY src/ /app/src/
 COPY tests/ /app/tests/
 COPY dbt/ /app/dbt/
+COPY scripts/ /app/scripts/
 COPY pytest.ini /app/pytest.ini
 
 # Ponto de entrada padrão: validação da suíte de testes
