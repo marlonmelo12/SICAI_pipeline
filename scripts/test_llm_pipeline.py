@@ -74,7 +74,7 @@ def main():
 
     # 4. Executa a extração
     print("==> Executando inferência e extração estruturada...")
-    extraction_result = worker.process_pdf(pdf_target, max_pages=3)
+    extraction_result = worker.process_pdf(pdf_target, max_pages=None)
 
     print(f"\n" + "-" * 70)
     print(f" RESULTADO DA EXTRAÇÃO (Páginas analisadas: {extraction_result.total_pages_analyzed})")

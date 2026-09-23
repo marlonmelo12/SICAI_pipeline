@@ -21,23 +21,28 @@ from src.quality.schemas import (
 
 logger = logging.getLogger("SICAI.LLMCustodyWorker")
 
-SYSTEM_PROMPT = """Você é um especialista em Perícia Forense Digital e Cadeia de Custódia segundo a Lei 13.964/2019 (Pacote Anticrime) e os artigos 158-A a 158-F do Código de Processo Penal Brasileiro (CPP).
+SYSTEM_PROMPT = """Você é um especialista em Perícia Forense Digital e Cadeia de Custódia segundo os artigos 158-A a 158-F do CPP.
+Sua tarefa é analisar o texto de documentos policiais (Boletins de Ocorrência, Autos de Exibição e Apreensão, Certidões de Cartório, Laudos Periciais) e extrair os eventos de custódia e ações de autoridades/peritos.
 
-Sua tarefa é analisar o texto de uma página de inquérito policial ou laudo pericial e extrair TODOS os eventos formais de custódia e ações de agentes públicos/peritos.
+Ações típicas a extrair:
+- Apreensão de bens, celulares, computadores, mídias ou documentos;
+- Indicação ou verificação de número de LACRE (ex: LACRE 0011610, 0011634, 0011616);
+- Recebimento de bens por escrivão ou entrega por testemunha/policial;
+- Assinatura digital ou lavratura de termo por Delegado, Escrivão ou Perito Criminal;
+- Relacramento, acondicionamento e remessa ao Instituto de Criminalística / PEFOCE.
 
-Para cada evento encontrado, retorne um objeto JSON estritamente com os seguintes campos:
-- actor_name: Nome da pessoa ou autoridade (Ex: 'Antônio Carlos', 'Marcelo Augusto').
-- actor_role: Cargo normatizado ('DELEGADO', 'PERITO_CRIMINAL', 'ESCRIVAO', 'JUIZ', 'PROMOTOR', 'POLICIAL_CIVIL', 'OUTRO').
-- agency: Órgão público ('Polícia Civil', 'PEFOCE', 'Instituto de Criminalística', etc.).
-- stage_cpp: Exatamente uma das 10 etapas do art. 158-B do CPP:
-  ['RECONHECIMENTO', 'ISOLAMENTO', 'FIXACAO', 'COLETA', 'RECEBIMENTO', 'TRANSPORTE', 'PROCESSAMENTO', 'ARMAZENAMENTO', 'DESCARTE'].
-- action_description: O que o ator fez (ex: 'Apreendeu o aparelho', 'Rompeu o lacre para extração', 'Emitiu laudo pericial').
-- seal_number: Número do lacre citado (ou null se não houver).
-- event_timestamp: Data e hora do fato no formato ISO-8601 (ou AAAA-MM-DD se só houver data, ou null).
+Campos de cada objeto JSON:
+- actor_name: Nome da autoridade, policial, escrivão ou perito (ex: 'EDMAR ROGÉRIO DIAS CAPARROZ', 'Thiago Fernando Silva de Oliveira', ou nome do órgão se individual não citado).
+- actor_role: Cargo ('DELEGADO', 'ESCRIVAO', 'PERITO_CRIMINAL', 'POLICIAL_CIVIL', 'AUTORIDADE_POLICIAL').
+- agency: Órgão ('Polícia Civil', 'Instituto de Criminalística', etc.).
+- stage_cpp: Uma das etapas: 'COLETA', 'FIXACAO', 'RECEBIMENTO', 'TRANSPORTE', 'PROCESSAMENTO', 'ARMAZENAMENTO'.
+- action_description: Resumo objetivo da ação executada (ex: 'Apreensão formal de aparelho e objetos', 'Relacramento para envio à perícia').
+- seal_number: Número do lacre citado (ex: '0011610', '0011634', '0011616'). Se não houver lacre, use null.
+- event_timestamp: Data e hora no formato ISO-8601 ou AAAA-MM-DD (ex: '2021-12-08T09:28:00' ou '2021-12-08').
 - page_number: O número da página informado no prompt.
-- verbatim_quote: Trecho literal exato do texto (palavra por palavra) que comprova a informação. É PROIBIDO inventar ou parafrasear.
+- verbatim_quote: Trecho literal exato do texto (palavra por palavra) que comprova a informação.
 
-Responda APENAS com um array JSON de objetos: `[{"actor_name": ...}, ...]`. Se não houver nenhum evento formal de custódia na página, retorne `[]`.
+Responda SEMPRE com um array JSON no formato: `[{"actor_name": "...", ...}]`. Se a página não contiver marcos relevantes, retorne `[]`.
 """
 
 class QwenEngineAdapter(ABC):
@@ -127,6 +132,7 @@ class OllamaQwenEngine(QwenEngineAdapter):
             response.raise_for_status()
             data = response.json()
             raw_content = data.get("message", {}).get("content", "[]")
+            logger.info(f"Página {page_number}: Resposta bruta da LLM ({len(raw_content)} chars): {raw_content[:150]}...")
 
             # Parse do JSON estruturado
             parsed = json.loads(raw_content)
@@ -145,10 +151,11 @@ class OllamaQwenEngine(QwenEngineAdapter):
                     # Auditoria estrita de Ground Truth
                     if event.verify_ground_truth(page_text):
                         valid_events.append(event)
+                        logger.info(f"Página {page_number}: Evento VALIDADO -> {event.actor_name} ({event.stage_cpp}) | Lacre: {event.seal_number}")
                     else:
-                        logger.warning(f"Evento descartado por alucinação de citação literal: {event.verbatim_quote}")
+                        logger.warning(f"Página {page_number}: Citação não confirmada no Ground Truth: '{event.verbatim_quote}'")
                 except Exception as val_err:
-                    logger.debug(f"Erro na validação Pydantic de item LLM: {val_err}")
+                    logger.warning(f"Página {page_number}: Erro de validação Pydantic: {val_err}")
 
             return valid_events
         except Exception as e:

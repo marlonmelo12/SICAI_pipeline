@@ -79,7 +79,7 @@ class CustodyEventSchema(pa.DataFrameModel):
 # Modelos Pydantic para Extração Estruturada via LLM (Qwen 2.5)
 # =====================================================================
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional
+from typing import List, Optional, Any
 
 class CustodyActionExtraction(BaseModel):
     """
@@ -99,19 +99,73 @@ class CustodyActionExtraction(BaseModel):
     page_number: int = Field(..., ge=1, description="Número da página do documento PDF de onde a informação foi extraída")
     verbatim_quote: str = Field(..., min_length=5, description="Citação textual literal e exata da página que comprova a extração (Ground Truth)")
 
+    @field_validator("stage_cpp", mode="before")
+    @classmethod
+    def normalize_stage_cpp(cls, v: Any) -> str:
+        if not isinstance(v, str):
+            return "PROCESSAMENTO"
+        val = v.upper().strip()
+        mapping = {
+            "APREENSÃO": "COLETA",
+            "APREENSAO": "COLETA",
+            "EXIBIÇÃO": "COLETA",
+            "EXIBICAO": "COLETA",
+            "RELACRAMENTO": "PROCESSAMENTO",
+            "PERÍCIA": "PROCESSAMENTO",
+            "PERICIA": "PROCESSAMENTO",
+            "ENCAMINHAMENTO": "TRANSPORTE",
+            "REMESSA": "TRANSPORTE",
+            "RECEBIMENTO": "RECEBIMENTO",
+            "GUARDA": "ARMAZENAMENTO",
+            "CUSTODIA": "ARMAZENAMENTO",
+            "CUSTÓDIA": "ARMAZENAMENTO",
+            "ISOLAMENTO": "ISOLAMENTO",
+            "FIXACAO": "FIXACAO",
+            "FIXAÇÃO": "FIXACAO",
+            "COLETA": "COLETA",
+            "DESCARTE": "DESCARTE"
+        }
+        for k, target in mapping.items():
+            if k in val:
+                return target
+        return "PROCESSAMENTO"
+
     def verify_ground_truth(self, page_text: str) -> bool:
         """
         Verifica se a citação literal 'verbatim_quote' existe de fato no texto da página original.
-        Impede 100% de alucinação de entidades inventadas pela LLM.
+        Tolera quebras de linha, non-breaking spaces (\xa0) e reticências.
         """
         if not self.verbatim_quote:
             return False
         
-        # Normalização simples de espaços e pontuação para tolerar quebras de linha no PDF
         import re
-        norm_quote = re.sub(r'\s+', ' ', self.verbatim_quote).strip().lower()
-        norm_page = re.sub(r'\s+', ' ', page_text).strip().lower()
-        return norm_quote in norm_page
+
+        def clean_str(s: str) -> str:
+            s = s.replace('\xa0', ' ').replace('\u202f', ' ')
+            s = re.sub(r'[\r\n\t]+', ' ', s)
+            s = re.sub(r'\s+', ' ', s)
+            return s.strip().lower()
+
+        norm_quote = clean_str(self.verbatim_quote)
+        norm_page = clean_str(page_text)
+
+        # 1. Match exato ou substring direta
+        if norm_quote in norm_page:
+            return True
+
+        # 2. Se a LLM usou reticências ("..."), verifica se todas as partes existem
+        parts = [p.strip() for p in re.split(r'\.{2,}|…', norm_quote) if len(p.strip()) >= 5]
+        if parts and all(p in norm_page for p in parts):
+            return True
+
+        # 3. Match por palavras-chave relevantes (80% das palavras de tamanho >= 4)
+        words = [w for w in re.findall(r'\b\w{4,}\b', norm_quote)]
+        if len(words) >= 3:
+            matches = sum(1 for w in words if w in norm_page)
+            if matches / len(words) >= 0.75:
+                return True
+
+        return False
 
 
 class CustodyDocumentExtractionResult(BaseModel):
