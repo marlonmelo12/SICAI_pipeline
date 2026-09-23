@@ -1,0 +1,213 @@
+version: '3.8'
+
+networks:
+  sicai-net:
+    name: sicai-network
+    driver: bridge
+
+services:
+  # -------------------------------------------------------------
+  # 1. Object Storage: Garage S3 (Lakehouse Forense WORM)
+  # -------------------------------------------------------------
+  garage:
+    image: dxflrs/garage:v1.0.1
+    container_name: sicai-garage
+    networks:
+      - sicai-net
+    ports:
+      - "3900:3900" # S3 API endpoint
+      - "3902:3902" # S3 Web
+      - "3903:3903" # Admin API endpoint
+    volumes:
+      - ./infra/garage/config.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "garage status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # 2. Catálogo de Metadados e Governança: PostgreSQL 16
+  # -------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: sicai-postgres
+    networks:
+      - sicai-net
+    environment:
+      POSTGRES_DB: sicai
+      POSTGRES_USER: sicai_admin
+      POSTGRES_PASSWORD: sicai_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sicai_admin -d sicai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # 3. Streaming de Eventos Forenses: Redpanda (Kafka 3.x)
+  # -------------------------------------------------------------
+  kafka:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.8
+    container_name: sicai-kafka
+    networks:
+      - sicai-net
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://kafka:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    restart: unless-stopped
+
+  # -------------------------------------------------------------
+  # 4. Motor de Busca e Indexação: OpenSearch 2.14
+  # -------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.14.0
+    container_name: sicai-opensearch
+    networks:
+      - sicai-net
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    restart: unless-stopped
+
+  # -------------------------------------------------------------
+  # 5. Interface Visual Forense: OpenSearch Dashboards
+  # -------------------------------------------------------------
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.14.0
+    container_name: sicai-dashboards
+    networks:
+      - sicai-net
+    ports:
+      - "5601:5601"
+    environment:
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    depends_on:
+      - opensearch
+    restart: unless-stopped
+
+  # -------------------------------------------------------------
+  # 6. Motor de IA Local: Ollama com Aceleração de GPU (CUDA)
+  # -------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sicai-ollama
+    networks:
+      - sicai-net
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # -------------------------------------------------------------
+  # 7. Orquestrador de Pipelines: Apache Airflow 2.9
+  # -------------------------------------------------------------
+  airflow:
+    image: apache/airflow:2.9.2-python3.11
+    container_name: sicai-airflow
+    networks:
+      - sicai-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://sicai_admin:sicai_password@postgres:5432/sicai
+      - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqJZPo=
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=sicai_secret_airflow_key
+      - PYTHONPATH=/opt/airflow:/opt/airflow/src
+      - OLLAMA_HOST=http://ollama:11434
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./Vernix:/opt/airflow/data/Vernix:ro
+    command: standalone
+    restart: unless-stopped
+
+  # -------------------------------------------------------------
+  # 8. Worker de Processamento do Pipeline Forense SICAI
+  # -------------------------------------------------------------
+  sicai-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sicai-pipeline-worker
+    networks:
+      - sicai-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    environment:
+      - S3_ENDPOINT_URL=http://garage:3900
+      - S3_REGION=garage
+      - S3_ACCESS_KEY=sicai_admin
+      - S3_SECRET_KEY=sicai_secret_key
+      - DATABASE_URL=postgresql://sicai_admin:sicai_password@postgres:5432/sicai
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - OPENSEARCH_URL=http://opensearch:9200
+      - OLLAMA_HOST=http://ollama:11434
+      - LLM_MODEL_NAME=qwen2.5:7b-instruct
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./dbt:/app/dbt
+      - ./data:/app/data
+      - ./Vernix:/app/Vernix:ro
+    command: ["pytest", "-v"]
+
+volumes:
+  garage_meta:
+  garage_data:
+  postgres_data:
+  redpanda_data:
+  opensearch_data:
+  ollama_models:
