@@ -13,6 +13,7 @@ import logging
 
 from src.workers.ufdr_parser_worker import UFDRStreamingParser
 from src.workers.custody_doc_worker import CustodyDocumentWorker
+from src.workers.llm_custody_worker import LLMCustodyWorker
 from src.lakehouse.storage import LakehouseStorageWriter
 from src.quality.schemas import ForensicArtifactSchema, ForensicEventSchema, CustodyEventSchema
 
@@ -31,7 +32,9 @@ class SilverLakehousePipeline:
         auto_apreensao_pdf: Optional[str] = None,
         laudo_oficial_pdf: Optional[str] = None,
         ingestion_id: Optional[str] = None,
-        batch_size: int = 5000
+        batch_size: int = 5000,
+        use_llm: bool = True,
+        llm_max_pages: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Executa a transformação ponta a ponta para popular as 3 tabelas da Camada Silver:
@@ -132,6 +135,22 @@ class SilverLakehousePipeline:
             ev2["event_id"] = str(uuid.uuid4())
             ev2["ingestion_id"] = ingest_id
             custody_records.append(ev2)
+
+        # Enriquecimento com IA (Qwen 2.5 / LLMCustodyWorker)
+        if use_llm:
+            try:
+                llm_worker = LLMCustodyWorker(
+                    case_id=case_id,
+                    evidence_id=evidence_id,
+                    tenant_id=tenant_id
+                )
+                for pdf_file in [auto_apreensao_pdf, laudo_oficial_pdf]:
+                    if pdf_file and os.path.exists(pdf_file):
+                        ext_res = llm_worker.process_pdf(pdf_file, max_pages=llm_max_pages)
+                        llm_records = llm_worker.to_custody_event_records(ext_res, ingestion_id=ingest_id)
+                        custody_records.extend(llm_records)
+            except Exception as llm_err:
+                logger.warning(f"Processamento LLM de custódia falhou, mantendo extração heurística: {llm_err}")
 
         if custody_records:
             df_custody = pd.DataFrame(custody_records)

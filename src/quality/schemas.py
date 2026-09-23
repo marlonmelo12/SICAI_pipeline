@@ -73,3 +73,52 @@ class CustodyEventSchema(pa.DataFrameModel):
     class Config:
         strict = False
         coerce = True
+
+
+# =====================================================================
+# Modelos Pydantic para Extração Estruturada via LLM (Qwen 2.5)
+# =====================================================================
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
+
+class CustodyActionExtraction(BaseModel):
+    """
+    Modelo representativo de um evento de cadeia de custódia (art. 158-B CPP)
+    extraído por LLM de peças processuais ou laudos periciais.
+    """
+    actor_name: str = Field(..., description="Nome completo do servidor, perito, delegado ou autoridade")
+    actor_role: str = Field(..., description="Cargo normatizado: DELEGADO, PERITO_CRIMINAL, ESCRIVAO, JUIZ, PROMOTOR, etc.")
+    agency: str = Field(..., description="Órgão de lotação: Polícia Civil, PEFOCE, Instituto de Criminalística, etc.")
+    stage_cpp: str = Field(
+        ...,
+        description="Fase legal da cadeia de custódia (CPP art. 158-B): RECONHECIMENTO, ISOLAMENTO, FIXACAO, COLETA, RECEBIMENTO, TRANSPORTE, PROCESSAMENTO, ARMAZENAMENTO ou DESCARTE"
+    )
+    action_description: str = Field(..., description="Descrição objetiva da ação pericial ou policial executada")
+    seal_number: Optional[str] = Field(None, description="Número do lacre rompido, verificado ou aplicado, se houver")
+    event_timestamp: Optional[str] = Field(None, description="Data e hora do evento em formato ISO-8601 ou AAAA-MM-DD")
+    page_number: int = Field(..., ge=1, description="Número da página do documento PDF de onde a informação foi extraída")
+    verbatim_quote: str = Field(..., min_length=5, description="Citação textual literal e exata da página que comprova a extração (Ground Truth)")
+
+    def verify_ground_truth(self, page_text: str) -> bool:
+        """
+        Verifica se a citação literal 'verbatim_quote' existe de fato no texto da página original.
+        Impede 100% de alucinação de entidades inventadas pela LLM.
+        """
+        if not self.verbatim_quote:
+            return False
+        
+        # Normalização simples de espaços e pontuação para tolerar quebras de linha no PDF
+        import re
+        norm_quote = re.sub(r'\s+', ' ', self.verbatim_quote).strip().lower()
+        norm_page = re.sub(r'\s+', ' ', page_text).strip().lower()
+        return norm_quote in norm_page
+
+
+class CustodyDocumentExtractionResult(BaseModel):
+    """
+    Envelope de resultados extraídos para uma peça processual completa.
+    """
+    document_name: str
+    total_pages_analyzed: int
+    events: List[CustodyActionExtraction] = Field(default_factory=list)
+

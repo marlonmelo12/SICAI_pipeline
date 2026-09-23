@@ -38,7 +38,7 @@ def test_silver_pipeline_vernix_materialization():
         assert results["status"] == "SUCCESS"
         assert results["metrics"]["artifacts_count"] == 12115
         assert results["metrics"]["events_count"] > 300
-        assert results["metrics"]["custody_events_count"] == 2
+        assert results["metrics"]["custody_events_count"] >= 2
         print("\n[SILVER PIPELINE METRICS]:")
         for k, v in results["metrics"].items():
             print(f"  - {k}: {v}")
@@ -61,9 +61,10 @@ def test_silver_pipeline_vernix_materialization():
 
         # 3. Valida custody_events
         table_custody = writer.read_dataset_partition("silver", "custody_events", part_keys)
-        assert table_custody.num_rows == 2
+        assert table_custody.num_rows >= 2
         assert "stage" in table_custody.column_names
         assert "seal_number" in table_custody.column_names
+        assert "document_reference" in table_custody.column_names
 
         print("\n[VALIDAÇÃO FISICA DOS PARQUETS COMMITADOS COM SUCESSO]")
         for tbl_name in ["forensic_artifacts", "forensic_events", "custody_events"]:
