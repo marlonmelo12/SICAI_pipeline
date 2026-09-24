@@ -70,9 +70,27 @@ class CustodyEventSchema(pa.DataFrameModel):
     hash_verified: Series[bool] = pa.Field(nullable=False)
     ingestion_id: Series[str] = pa.Field(nullable=False)
 
+
+class InquiryTimelineSchema(pa.DataFrameModel):
+    """Esquema colunar da Linha do Tempo Fática e Processual na camada Silver."""
+    event_id: Series[str] = pa.Field(nullable=False)
+    case_id: Series[str] = pa.Field(nullable=False)
+    tenant_id: Series[str] = pa.Field(nullable=False)
+    event_date: Series[str] = pa.Field(nullable=True)
+    raw_date_text: Series[str] = pa.Field(nullable=True)
+    event_type: Series[str] = pa.Field(nullable=False)
+    headline: Series[str] = pa.Field(nullable=False)
+    description: Series[str] = pa.Field(nullable=False)
+    primary_actor: Series[str] = pa.Field(nullable=True)
+    actors_json: Series[str] = pa.Field(nullable=False)
+    page_number: Series[int] = pa.Field(ge=1)
+    verbatim_quote: Series[str] = pa.Field(nullable=False)
+    ingestion_id: Series[str] = pa.Field(nullable=False)
+
     class Config:
         strict = False
         coerce = True
+
 
 
 # =====================================================================
@@ -175,4 +193,77 @@ class CustodyDocumentExtractionResult(BaseModel):
     document_name: str
     total_pages_analyzed: int
     events: List[CustodyActionExtraction] = Field(default_factory=list)
+
+
+# =====================================================================
+# Modelos para Reconstituição Cronológica de Inquéritos e Atores Processuais
+# =====================================================================
+
+class InquiryActor(BaseModel):
+    """Pessoa física citada nos autos com papel processual e instituição."""
+    name: str = Field(..., description="Nome completo da pessoa citada")
+    role: str = Field(
+        ...,
+        description="Cargo ou qualificação: DELEGADO, JUIZ, PROMOTOR, ESCRIVAO, INVESTIGADOR, PERITO, INVESTIGADO, VITIMA, TESTEMUNHA, ADVOGADO, OUTRO"
+    )
+    organization: Optional[str] = Field(None, description="Órgão ou instituição (Polícia Civil, TJSP, MPSP, IC, etc.)")
+
+
+class InquiryChronologicalEvent(BaseModel):
+    """
+    Fato ou marco processual cronológico extraído dos autos com atores e comprovação literal.
+    """
+    event_date: Optional[str] = Field(None, description="Data normalizada no formato AAAA-MM-DD ou ISO-8601")
+    raw_date_text: Optional[str] = Field(None, description="Texto literal da data como consta na página (ex: '20 de setembro de 2021')")
+    event_type: str = Field(
+        ...,
+        description="Tipo de ato: INSTAURACAO, DECISAO_JUDICIAL, AUTORIZACAO_OPERACAO, MANDADO_BUSCA, APREENSAO, OITIVA_DEPOIMENTO, RELATORIO_INVESTIGACAO, LAUDO_PERICIAL, DESPACHO, OUTRO"
+    )
+    headline: str = Field(..., description="Título sintético do evento em 1 linha")
+    description: str = Field(..., description="Narrativa factual objetiva do que aconteceu, quem autorizou/executou e consequências")
+    actors: List[InquiryActor] = Field(default_factory=list, description="Lista de pessoas físicas diretamente envolvidas neste ato")
+    page_number: int = Field(..., ge=1, description="Número da página onde o fato está assentado")
+    verbatim_quote: str = Field(..., min_length=5, description="Citação literal palavra por palavra que comprova o fato (Ground Truth)")
+
+    def verify_ground_truth(self, page_text: str) -> bool:
+        """Verifica a integridade literal da citação contra a página dos autos."""
+        if not self.verbatim_quote:
+            return False
+        
+        import re
+
+        def clean_str(s: str) -> str:
+            s = s.replace('\xa0', ' ').replace('\u202f', ' ')
+            s = re.sub(r'[\r\n\t]+', ' ', s)
+            s = re.sub(r'\s+', ' ', s)
+            return s.strip().lower()
+
+        norm_quote = clean_str(self.verbatim_quote)
+        norm_page = clean_str(page_text)
+
+        if norm_quote in norm_page:
+            return True
+
+        parts = [p.strip() for p in re.split(r'\.{2,}|…', norm_quote) if len(p.strip()) >= 5]
+        if parts and all(p in norm_page for p in parts):
+            return True
+
+        words = [w for w in re.findall(r'\b\w{4,}\b', norm_quote)]
+        if len(words) >= 3:
+            matches = sum(1 for w in words if w in norm_page)
+            if matches / len(words) >= 0.70:
+                return True
+
+        return False
+
+
+class InquiryTimelineReport(BaseModel):
+    """
+    Relatório consolidado de reconstituição cronológica de um inquérito/processo.
+    """
+    case_id: str
+    document_name: str
+    total_pages_analyzed: int
+    events: List[InquiryChronologicalEvent] = Field(default_factory=list)
+
 
