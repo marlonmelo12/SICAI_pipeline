@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import re
+import argparse
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -69,13 +70,17 @@ def triage_pages(pdf_path: str, regex_patterns: List[str]) -> List[int]:
     return matching_pages
 
 def main():
+    parser = argparse.ArgumentParser(description="SICAI - Processamento Forense de Autos Processuais Massivos")
+    parser.add_argument("pdf_path", nargs="?", default="Vernix/PROCESSO/1501022-64.2019.8.26.0483-001.pdf", help="Caminho do arquivo PDF do processo judicial")
+    parser.add_argument("--all", action="store_true", help="Processar integralmente todas as páginas probatórias detectadas na triagem")
+    parser.add_argument("--max", type=int, default=None, help="Limite máximo de páginas probatórias a processar")
+    args = parser.parse_args()
+
     print("=" * 75)
     print("   SICAI - PROCESSAMENTO DE AUTOS PROCESSUAIS MASSIVOS (IA + GPU)   ")
     print("=" * 75)
 
-    pdf_target = "Vernix/PROCESSO/1501022-64.2019.8.26.0483-001.pdf"
-    if len(sys.argv) > 1:
-        pdf_target = sys.argv[1]
+    pdf_target = args.pdf_path
 
     if not os.path.exists(pdf_target):
         print(f"\n[ERRO] Arquivo não encontrado: {pdf_target}")
@@ -96,22 +101,13 @@ def main():
     print(f" -> Economia de Computação: {(1 - len(matching_pages)/11783)*100:.1f}% das páginas irrelevantes descartadas antes da LLM.")
 
     # Suporte a argumentos CLI e variáveis de ambiente
-    process_all = "--all" in sys.argv
-    max_batch_arg = None
-    for arg_idx, arg in enumerate(sys.argv):
-        if arg == "--max" and arg_idx + 1 < len(sys.argv):
-            try:
-                max_batch_arg = int(sys.argv[arg_idx + 1])
-            except ValueError:
-                pass
-
     batch_env = os.getenv("MAX_PAGES_BATCH", "30").strip().lower()
 
-    if process_all or batch_env in ("all", "0", "-1", "none"):
+    if args.all or batch_env in ("all", "0", "-1", "none"):
         pages_to_process = matching_pages
         print(f" -> Modo Integral Ativado: Analisando TODAS as {len(pages_to_process)} páginas probatórias com a LLM...")
     else:
-        max_batch = max_batch_arg if max_batch_arg is not None else int(batch_env)
+        max_batch = args.max if args.max is not None else int(batch_env)
         pages_to_process = matching_pages[:max_batch]
         print(f" -> Processando lote com as {len(pages_to_process)} primeiras páginas probatórias (use --all ou MAX_PAGES_BATCH=all para todas as {len(matching_pages)})...")
 
